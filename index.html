@@ -1,0 +1,511 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>救急外来トリアージシート</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<style>
+  body {
+    font-family: 'Inter', sans-serif;
+    background-color: #f3f4f6;
+    color: #374151;
+  }
+  .slide-up {
+    transform: translateY(100%);
+  }
+  .slide-up-active {
+    transform: translateY(0);
+  }
+  /* Custom styles for the drawing canvas */
+  #triageCanvas {
+    background-color: #ffffff;
+    border: 1px solid #d1d5db;
+    touch-action: none;
+    cursor: crosshair;
+  }
+  .keypad-button {
+    @apply p-4 m-1 bg-gray-200 rounded-lg shadow-sm text-2xl font-bold transition duration-200;
+  }
+  .keypad-button:active {
+    @apply bg-gray-300;
+  }
+  .symptom-tag {
+    @apply px-4 py-2 m-1 bg-blue-100 text-blue-800 rounded-full font-medium transition duration-200;
+  }
+  .symptom-tag:active {
+    @apply bg-blue-200;
+  }
+  .triage-level-button {
+    @apply w-full py-4 text-center font-bold text-white rounded-lg transition duration-200 transform hover:scale-105 active:scale-95;
+  }
+  .red { @apply bg-red-600; }
+  .yellow { @apply bg-yellow-500; }
+  .green { @apply bg-green-500; }
+  .black { @apply bg-gray-800; }
+  .canvas-controls {
+    @apply flex justify-end gap-2 mt-2;
+  }
+  .clear-canvas {
+    @apply px-4 py-2 bg-red-500 text-white rounded-lg shadow-sm font-medium transition duration-200;
+  }
+  .select-menu {
+    @apply block w-full rounded-md shadow-sm;
+  }
+</style>
+<script type="module">
+  import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+  import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+  import { getFirestore, doc, getDoc, addDoc, onSnapshot, collection, query, getDocs } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+
+  const firebaseConfig = JSON.parse(__firebase_config);
+  const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
+  let db, auth, userId;
+  let isAuthReady = false;
+
+  async function initializeFirebase() {
+    try {
+      const app = initializeApp(firebaseConfig);
+      db = getFirestore(app);
+      auth = getAuth(app);
+      
+      onAuthStateChanged(auth, (user) => {
+        if (user) {
+          userId = user.uid;
+        } else {
+          userId = crypto.randomUUID();
+        }
+        isAuthReady = true;
+        document.getElementById('userIdDisplay').textContent = `ユーザーID: ${userId}`;
+        console.log("Firebase Auth state changed. User ID:", userId);
+        setupRealtimeDataListener();
+      });
+
+      if (typeof __initial_auth_token !== 'undefined') {
+        await signInWithCustomToken(auth, __initial_auth_token);
+      } else {
+        await signInAnonymously(auth);
+      }
+      
+      updateReceiptNumber();
+      
+    } catch (error) {
+      console.error("Firebase initialization error:", error);
+      document.getElementById('saveMessage').textContent = 'データベース接続に失敗しました。コンソールを確認してください。';
+      document.getElementById('saveMessage').classList.remove('hidden');
+    }
+  }
+  
+  function getCollectionPath() {
+    return `/artifacts/${appId}/public/data/triageSheets`;
+  }
+
+  function setupRealtimeDataListener() {
+    if (!db || !isAuthReady) return;
+    const q = query(collection(db, getCollectionPath()));
+    onSnapshot(q, (querySnapshot) => {
+      const sheets = [];
+      querySnapshot.forEach((doc) => {
+        sheets.push({ id: doc.id, ...doc.data() });
+      });
+      sheets.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
+      renderTriageSheets(sheets);
+    }, (error) => {
+      console.error("Failed to listen for data:", error);
+    });
+  }
+
+  function renderTriageSheets(sheets) {
+    const list = document.getElementById('sheetList');
+    list.innerHTML = '';
+    sheets.forEach(sheet => {
+      const card = document.createElement('div');
+      card.className = 'bg-white rounded-lg shadow-md p-4 mb-4 cursor-pointer hover:bg-gray-100 transition duration-200';
+      card.innerHTML = `
+        <h3 class="text-xl font-bold mb-2">シート #${sheet.receiptNumber}</h3>
+        <p class="text-gray-600 mb-1">来院時刻: ${sheet.arrivalDateTime}</p>
+        <p class="text-gray-600 mb-1">主訴: ${sheet.chiefComplaint}</p>
+        <div class="mt-2">
+          <span class="px-3 py-1 text-sm font-semibold rounded-full ${sheet.triageLevel === 'Red' ? 'bg-red-200 text-red-800' : ''} ${sheet.triageLevel === 'Yellow' ? 'bg-yellow-200 text-yellow-800' : ''} ${sheet.triageLevel === 'Green' ? 'bg-green-200 text-green-800' : ''} ${sheet.triageLevel === 'Black' ? 'bg-gray-200 text-gray-800' : ''}">
+            ${sheet.triageLevel === 'Red' ? '赤' : ''}${sheet.triageLevel === 'Yellow' ? '黄' : ''}${sheet.triageLevel === 'Green' ? '緑' : ''}${sheet.triageLevel === 'Black' ? '黒' : ''}
+          </span>
+        </div>
+      `;
+      card.onclick = () => showSheetDetails(sheet);
+      list.appendChild(card);
+    });
+  }
+  
+  function showSheetDetails(sheet) {
+    const detailsModal = document.getElementById('detailsModal');
+    const detailsContent = document.getElementById('detailsContent');
+    const drawingCanvas = document.getElementById('drawingCanvas');
+    const context = drawingCanvas.getContext('2d');
+    
+    detailsContent.innerHTML = `
+      <h2 class="text-2xl font-bold mb-4">シート #${sheet.receiptNumber} の詳細</h2>
+      <p class="mb-2"><span class="font-semibold">来院時刻:</span> ${sheet.arrivalDateTime}</p>
+      <p class="mb-2"><span class="font-semibold">発症時間:</span> ${sheet.onsetDateTime}</p>
+      <p class="mb-2"><span class="font-semibold">主訴:</span> ${sheet.chiefComplaint}</p>
+      <div class="grid grid-cols-2 gap-4 my-4">
+        <p><span class="font-semibold">HR (拍/分):</span> ${sheet.hr}</p>
+        <p><span class="font-semibold">BP (mmHg):</span> ${sheet.bp}</p>
+        <p><span class="font-semibold">RR (回/分):</span> ${sheet.rr}</p>
+        <p><span class="font-semibold">SpO₂ (%):</span> ${sheet.spO2}</p>
+        <p><span class="font-semibold">体温 (°C):</span> ${sheet.temp}</p>
+      </div>
+      <p class="mb-2"><span class="font-semibold">トリアージレベル:</span> <span class="px-3 py-1 text-sm font-semibold rounded-full ${sheet.triageLevel === 'Red' ? 'bg-red-200 text-red-800' : ''} ${sheet.triageLevel === 'Yellow' ? 'bg-yellow-200 text-yellow-800' : ''} ${sheet.triageLevel === 'Green' ? 'bg-green-200 text-green-800' : ''} ${sheet.triageLevel === 'Black' ? 'bg-gray-200 text-gray-800' : ''}">
+        ${sheet.triageLevel === 'Red' ? '赤' : ''}${sheet.triageLevel === 'Yellow' ? '黄' : ''}${sheet.triageLevel === 'Green' ? '緑' : ''}${sheet.triageLevel === 'Black' ? '黒' : ''}
+      </span></p>
+      <p class="mb-2"><span class="font-semibold">自由記載:</span></p>
+    `;
+    
+    if (sheet.drawingData) {
+      const img = new Image();
+      img.onload = () => {
+        const tempCanvas = document.createElement('canvas');
+        tempCanvas.width = img.width;
+        tempCanvas.height = img.height;
+        const tempContext = tempCanvas.getContext('2d');
+        tempContext.drawImage(img, 0, 0);
+
+        const drawingContainer = document.getElementById('drawingContainer');
+        drawingContainer.innerHTML = '';
+        drawingContainer.appendChild(img);
+      };
+      img.src = sheet.drawingData;
+    } else {
+      document.getElementById('drawingContainer').innerHTML = '<p class="text-gray-500">手書きメモはありません。</p>';
+    }
+
+    detailsModal.classList.remove('hidden');
+    document.body.style.overflow = 'hidden';
+  }
+
+  function hideDetailsModal() {
+    document.getElementById('detailsModal').classList.add('hidden');
+    document.body.style.overflow = 'auto';
+  }
+
+  function updateReceiptNumber() {
+    document.getElementById('receiptNumber').textContent = crypto.randomUUID().slice(0, 8);
+  }
+
+  document.addEventListener('DOMContentLoaded', () => {
+    initializeFirebase();
+
+    const canvas = document.getElementById('triageCanvas');
+    const context = canvas.getContext('2d');
+    let isDrawing = false;
+    let lastX = 0;
+    let lastY = 0;
+
+    context.lineWidth = 3;
+    context.lineCap = 'round';
+    context.strokeStyle = '#000000';
+
+    const getPosition = (event) => {
+      const rect = canvas.getBoundingClientRect();
+      let x, y;
+      if (event.touches) {
+        x = event.touches[0].clientX - rect.left;
+        y = event.touches[0].clientY - rect.top;
+      } else {
+        x = event.clientX - rect.left;
+        y = event.clientY - rect.top;
+      }
+      return { x, y };
+    };
+
+    const draw = (e) => {
+      if (!isDrawing) return;
+      context.beginPath();
+      context.moveTo(lastX, lastY);
+      const { x, y } = getPosition(e);
+      context.lineTo(x, y);
+      context.stroke();
+      [lastX, lastY] = [x, y];
+    };
+
+    canvas.addEventListener('mousedown', (e) => {
+      isDrawing = true;
+      [lastX, lastY] = [e.offsetX, e.offsetY];
+    });
+    canvas.addEventListener('mousemove', draw);
+    canvas.addEventListener('mouseup', () => isDrawing = false);
+    canvas.addEventListener('mouseout', () => isDrawing = false);
+    canvas.addEventListener('touchstart', (e) => {
+      isDrawing = true;
+      const { x, y } = getPosition(e);
+      [lastX, lastY] = [x, y];
+      e.preventDefault();
+    }, { passive: false });
+    canvas.addEventListener('touchmove', draw, { passive: false });
+    canvas.addEventListener('touchend', () => isDrawing = false);
+
+    document.getElementById('clearCanvas').addEventListener('click', () => {
+      context.clearRect(0, 0, canvas.width, canvas.height);
+    });
+
+    // Custom Keypad logic
+    const keypad = document.getElementById('keypad');
+    const keypadContainer = document.getElementById('keypadContainer');
+    let activeInput = null;
+
+    document.querySelectorAll('input[inputmode="numeric"]').forEach(input => {
+      input.addEventListener('focus', (e) => {
+        activeInput = e.target;
+        keypad.classList.remove('slide-up');
+        keypad.classList.add('slide-up-active');
+      });
+    });
+
+    document.querySelectorAll('.keypad-button').forEach(button => {
+      button.addEventListener('click', () => {
+        if (!activeInput) return;
+        const value = button.textContent;
+        if (value === '←') {
+          activeInput.value = activeInput.value.slice(0, -1);
+        } else if (value === 'OK') {
+          keypad.classList.remove('slide-up-active');
+          keypad.classList.add('slide-up');
+          activeInput.blur();
+        } else {
+          activeInput.value += value;
+        }
+      });
+    });
+
+    const keypadOkButton = document.getElementById('keypadOk');
+    keypadOkButton.addEventListener('click', () => {
+      keypad.classList.remove('slide-up-active');
+      keypad.classList.add('slide-up');
+      if (activeInput) {
+        activeInput.blur();
+      }
+    });
+
+    // Chief complaint suggestions
+    const chiefComplaintInput = document.getElementById('chiefComplaint');
+    const chiefComplaintSuggestions = document.getElementById('chiefComplaintSuggestions');
+    const suggestions = ['胸痛', '腹痛', '頭痛', '呼吸困難', '発熱', '吐き気', '嘔吐', '下痢', 'めまい', '失神', 'けいれん', '外傷', '出血', '意識障害', 'アナフィラキシー', 'ショック'];
+
+    chiefComplaintInput.addEventListener('focus', () => {
+      chiefComplaintSuggestions.innerHTML = suggestions.map(s => `<span class="symptom-tag">${s}</span>`).join('');
+      chiefComplaintSuggestions.classList.remove('hidden');
+    });
+
+    chiefComplaintSuggestions.addEventListener('click', (e) => {
+      if (e.target.classList.contains('symptom-tag')) {
+        chiefComplaintInput.value = e.target.textContent;
+        chiefComplaintSuggestions.classList.add('hidden');
+        chiefComplaintInput.blur();
+      }
+    });
+
+    // Save button logic
+    document.getElementById('saveSheet').addEventListener('click', async () => {
+      const saveButton = document.getElementById('saveSheet');
+      const saveMessage = document.getElementById('saveMessage');
+      saveButton.disabled = true;
+      saveMessage.textContent = '保存中...';
+      saveMessage.classList.remove('hidden', 'text-green-600', 'text-red-600');
+      saveMessage.classList.add('text-gray-600');
+
+      if (!db || !auth || !isAuthReady) {
+        saveMessage.textContent = 'データベースに接続されていません。';
+        saveMessage.classList.remove('hidden');
+        saveButton.disabled = false;
+        return;
+      }
+      
+      const canvas = document.getElementById('triageCanvas');
+      const drawingData = canvas.toDataURL();
+      
+      const triageData = {
+        receiptNumber: document.getElementById('receiptNumber').textContent,
+        arrivalDateTime: document.getElementById('arrivalDateTime').value,
+        onsetDateTime: document.getElementById('onsetDateTime').value,
+        chiefComplaint: document.getElementById('chiefComplaint').value,
+        hr: document.getElementById('hr').value,
+        bp: document.getElementById('bp').value,
+        rr: document.getElementById('rr').value,
+        spO2: document.getElementById('spO2').value,
+        temp: document.getElementById('temp').value,
+        triageLevel: document.querySelector('input[name="triageLevel"]:checked')?.value || '',
+        drawingData: drawingData,
+        timestamp: new Date().toISOString(),
+        userId: userId,
+      };
+
+      try {
+        await addDoc(collection(db, getCollectionPath()), triageData);
+        saveMessage.textContent = '保存完了！';
+        saveMessage.classList.remove('text-gray-600');
+        saveMessage.classList.add('text-green-600');
+        
+        // Reset form after successful save
+        document.getElementById('triageForm').reset();
+        document.getElementById('triageCanvas').getContext('2d').clearRect(0, 0, canvas.width, canvas.height);
+        updateReceiptNumber();
+        
+      } catch (error) {
+        console.error("Error saving document: ", error);
+        saveMessage.textContent = '保存中にエラーが発生しました。';
+        saveMessage.classList.remove('text-gray-600');
+        saveMessage.classList.add('text-red-600');
+      } finally {
+        saveButton.disabled = false;
+        setTimeout(() => {
+          saveMessage.classList.add('hidden');
+        }, 3000);
+      }
+    });
+
+    document.getElementById('closeDetails').addEventListener('click', hideDetailsModal);
+  });
+</script>
+</head>
+<body class="bg-gray-100 min-h-screen">
+  <div class="container mx-auto p-4 md:p-8">
+    <div class="max-w-4xl mx-auto">
+      <div class="bg-white rounded-xl shadow-lg p-6 md:p-10 mb-8">
+        <h1 class="text-3xl md:text-4xl font-extrabold text-center mb-6 text-gray-800">救急外来トリアージシート</h1>
+        <p id="userIdDisplay" class="text-sm text-gray-500 text-center mb-4"></p>
+        
+        <form id="triageForm" class="space-y-6">
+          <div class="grid grid-cols-2 md:grid-cols-4 gap-6 mb-6">
+            <div class="col-span-2">
+              <label class="block text-sm font-medium text-gray-700">受付番号</label>
+              <div id="receiptNumber" class="mt-1 block w-full p-3 bg-gray-100 rounded-md shadow-sm border-gray-300 font-bold text-lg">
+                <!-- 受付番号はJavaScriptで設定されます -->
+              </div>
+            </div>
+            <div class="col-span-2">
+              <label for="arrivalDateTime" class="block text-sm font-medium text-gray-700">来院時刻</label>
+              <input type="datetime-local" id="arrivalDateTime" name="arrivalDateTime" class="mt-1 block w-full p-3 border border-gray-300 rounded-md shadow-sm">
+            </div>
+            <div class="col-span-2 md:col-span-2">
+              <label for="onsetDateTime" class="block text-sm font-medium text-gray-700">発症時間</label>
+              <input type="datetime-local" id="onsetDateTime" name="onsetDateTime" class="mt-1 block w-full p-3 border border-gray-300 rounded-md shadow-sm">
+            </div>
+          </div>
+          
+          <div class="mb-6">
+            <label for="chiefComplaint" class="block text-sm font-medium text-gray-700">主訴</label>
+            <input type="text" id="chiefComplaint" name="chiefComplaint" placeholder="主訴を入力または選択" class="mt-1 block w-full p-3 border border-gray-300 rounded-md shadow-sm">
+            <div id="chiefComplaintSuggestions" class="mt-2 flex flex-wrap gap-2 hidden"></div>
+          </div>
+
+          <h2 class="text-2xl font-bold text-gray-800 mb-4 text-center">バイタルサイン</h2>
+          <div class="grid grid-cols-2 sm:grid-cols-3 gap-6">
+            <div>
+              <label for="hr" class="block text-sm font-medium text-gray-700">HR (拍/分)</label>
+              <input type="text" id="hr" name="hr" inputmode="numeric" placeholder="-- bpm" class="mt-1 block w-full p-3 border border-gray-300 rounded-md shadow-sm text-center">
+            </div>
+            <div>
+              <label for="bp" class="block text-sm font-medium text-gray-700">BP (mmHg)</label>
+              <input type="text" id="bp" name="bp" inputmode="numeric" placeholder="-- mmHg" class="mt-1 block w-full p-3 border border-gray-300 rounded-md shadow-sm text-center">
+            </div>
+            <div>
+              <label for="rr" class="block text-sm font-medium text-gray-700">RR (回/分)</label>
+              <input type="text" id="rr" name="rr" inputmode="numeric" placeholder="-- /min" class="mt-1 block w-full p-3 border border-gray-300 rounded-md shadow-sm text-center">
+            </div>
+            <div>
+              <label for="spO2" class="block text-sm font-medium text-gray-700">SpO₂ (%)</label>
+              <input type="text" id="spO2" name="spO2" inputmode="numeric" placeholder="-- %" class="mt-1 block w-full p-3 border border-gray-300 rounded-md shadow-sm text-center">
+            </div>
+            <div class="col-span-2 sm:col-span-1">
+              <label for="temp" class="block text-sm font-medium text-gray-700">体温 (°C)</label>
+              <input type="text" id="temp" name="temp" inputmode="numeric" placeholder="-- °C" class="mt-1 block w-full p-3 border border-gray-300 rounded-md shadow-sm text-center">
+            </div>
+          </div>
+          
+          <div id="keypadContainer" class="fixed inset-x-0 bottom-0 z-50 transform translate-y-full transition-transform duration-300 ease-in-out bg-white p-4 shadow-2xl rounded-t-2xl slide-up">
+            <div id="keypad" class="grid grid-cols-4 gap-2">
+              <button type="button" class="keypad-button">1</button>
+              <button type="button" class="keypad-button">2</button>
+              <button type="button" class="keypad-button">3</button>
+              <button type="button" class="keypad-button">←</button>
+              <button type="button" class="keypad-button">4</button>
+              <button type="button" class="keypad-button">5</button>
+              <button type="button" class="keypad-button">6</button>
+              <button type="button" class="keypad-button">.</button>
+              <button type="button" class="keypad-button">7</button>
+              <button type="button" class="keypad-button">8</button>
+              <button type="button" class="keypad-button">9</button>
+              <button type="button" class="keypad-button col-span-1" id="keypadOk">OK</button>
+              <button type="button" class="keypad-button col-span-2">0</button>
+            </div>
+          </div>
+
+          <h2 class="text-2xl font-bold text-gray-800 mb-4 text-center">自由記載 (手書き)</h2>
+          <div class="rounded-xl overflow-hidden shadow-sm border border-gray-300">
+            <canvas id="triageCanvas" class="w-full" height="300"></canvas>
+          </div>
+          <div class="canvas-controls">
+            <button type="button" id="clearCanvas" class="clear-canvas">消去</button>
+          </div>
+          
+          <h2 class="text-2xl font-bold text-gray-800 mb-4 text-center">トリアージレベル</h2>
+          <div class="grid grid-cols-2 sm:grid-cols-4 gap-4">
+            <div>
+              <input type="radio" id="triageRed" name="triageLevel" value="Red" class="hidden peer">
+              <label for="triageRed" class="triage-level-button red">
+                赤
+              </label>
+            </div>
+            <div>
+              <input type="radio" id="triageYellow" name="triageLevel" value="Yellow" class="hidden peer">
+              <label for="triageYellow" class="triage-level-button yellow">
+                黄
+              </label>
+            </div>
+            <div>
+              <input type="radio" id="triageGreen" name="triageLevel" value="Green" class="hidden peer">
+              <label for="triageGreen" class="triage-level-button green">
+                緑
+              </label>
+            </div>
+            <div>
+              <input type="radio" id="triageBlack" name="triageLevel" value="Black" class="hidden peer">
+              <label for="triageBlack" class="triage-level-button black">
+                黒
+              </label>
+            </div>
+          </div>
+          
+          <div class="mt-8">
+            <button type="button" id="saveSheet" class="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-4 px-6 rounded-lg shadow-lg transition duration-200 transform hover:scale-105">
+              保存
+            </button>
+            <p id="saveMessage" class="text-center mt-2 font-medium hidden"></p>
+          </div>
+        </form>
+      </div>
+
+      <!-- Triage Sheets List -->
+      <div class="bg-white rounded-xl shadow-lg p-6 md:p-10">
+        <h2 class="text-3xl font-extrabold text-center mb-6 text-gray-800">過去のトリアージシート</h2>
+        <div id="sheetList" class="space-y-4">
+          <!-- Sheets will be rendered here -->
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Details Modal -->
+  <div id="detailsModal" class="hidden fixed inset-0 z-50 overflow-auto bg-gray-800 bg-opacity-75 flex items-center justify-center p-4">
+    <div class="bg-white rounded-xl shadow-2xl w-full max-w-2xl p-6 md:p-8 relative">
+      <button id="closeDetails" class="absolute top-4 right-4 text-gray-500 hover:text-gray-800 transition duration-200">
+        <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
+        </svg>
+      </button>
+      <div id="detailsContent"></div>
+      <div id="drawingContainer" class="mt-4 border border-gray-300 rounded-lg p-2"></div>
+    </div>
+  </div>
+
+</body>
+</html>
