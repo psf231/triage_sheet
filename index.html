@@ -1,0 +1,872 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>救急隊コールトリアージ表</title>
+    <!-- Tailwind CSS CDN -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Google Fonts - Inter -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <!-- html2canvasライブラリ -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #f3f4f6;
+        }
+        .form-section {
+            @apply bg-white p-6 rounded-2xl shadow-lg border border-gray-200 mb-6;
+        }
+        .form-section-header {
+            @apply text-xl font-bold mb-4 text-gray-800 border-b pb-2;
+        }
+        .input-group {
+            @apply mb-4;
+        }
+        .input-label {
+            @apply block text-sm font-medium text-gray-700 mb-1;
+        }
+        .input-field, .textarea-field {
+            @apply w-full p-3 rounded-xl border border-gray-300 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all duration-200;
+        }
+        /* 日付と時間の入力ボックスの高さを統一 */
+        .input-field[type="date"], .input-field.select-field {
+            height: 48px;
+            padding-top: 12px;
+            padding-bottom: 12px;
+        }
+        .input-field[type="number"]::-webkit-outer-spin-button,
+        .input-field[type="number"]::-webkit-inner-spin-button {
+            -webkit-appearance: none;
+            margin: 0;
+        }
+        .input-field[type="number"] {
+            -moz-appearance: textfield;
+        }
+        .button {
+            @apply px-6 py-3 rounded-full text-lg font-bold transition-all duration-200 transform active:scale-95 shadow-md hover:shadow-lg;
+        }
+        .primary-button {
+            @apply bg-blue-600 text-white hover:bg-blue-700;
+        }
+        .secondary-button {
+            @apply bg-gray-200 text-gray-800 hover:bg-gray-300;
+        }
+        .modal-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(0, 0, 0, 0.6);
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            z-index: 1000;
+            visibility: hidden;
+            opacity: 0;
+            transition: visibility 0s, opacity 0.3s ease;
+        }
+        .modal-overlay.visible {
+            visibility: visible;
+            opacity: 1;
+        }
+        .modal-content {
+            background-color: white;
+            padding: 2rem;
+            border-radius: 1.5rem;
+            box-shadow: 0 10px 25px rgba(0,0,0,0.2);
+            max-width: 90%;
+            width: 400px;
+            text-align: center;
+        }
+        /* Custom Numpad Styles */
+        #numpad {
+            position: fixed;
+            bottom: -300px; /* Initially hidden below the screen */
+            left: 0;
+            width: 100%;
+            background-color: #f0f0f0;
+            padding: 1rem;
+            box-shadow: 0 -5px 15px rgba(0,0,0,0.1);
+            transition: bottom 0.3s ease-in-out;
+            z-index: 900;
+            border-top-left-radius: 1.5rem;
+            border-top-right-radius: 1.5rem;
+        }
+        #numpad.visible {
+            bottom: 0;
+        }
+        .numpad-grid {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 10px;
+            max-width: 400px;
+            margin: 0 auto;
+        }
+        .numpad-button {
+            @apply bg-white text-gray-800 text-3xl font-bold p-6 rounded-xl shadow-md transition-all duration-100;
+            line-height: 1;
+            padding-top: 1.5rem;
+            padding-bottom: 1.5rem;
+        }
+        .numpad-button:active {
+            @apply bg-gray-200 shadow-inner;
+        }
+        .numpad-button.delete {
+            font-size: 1.5rem;
+            @apply bg-red-500 text-white;
+        }
+    </style>
+</head>
+<body class="p-4 sm:p-8 bg-gray-100 min-h-screen flex items-start justify-center">
+
+    <div class="max-w-4xl w-full mx-auto" id="triage-form-container">
+        <header class="text-center mb-8">
+            <h1 class="text-3xl sm:text-4xl font-extrabold text-gray-900 leading-tight">救急隊コールトリアージ表</h1>
+        </header>
+
+        <!-- Main Form -->
+        <form id="triage-form" class="space-y-6">
+
+            <!-- 日付と時間の入力欄 -->
+            <div class="form-section">
+                <div class="flex flex-col sm:flex-row sm:gap-x-48">
+                    <div class="input-group">
+                        <label for="date-input" class="input-label">日付</label>
+                        <input type="date" id="date-input" class="input-field">
+                    </div>
+                    <!-- 時間の入力欄をフレックスコンテナで横並びにする -->
+                    <div class="flex items-center gap-2">
+                        <label class="input-label mb-0">時間</label>
+                        <select id="hour-select" class="input-field select-field">
+                            <!-- 時のオプションをJavaScriptで生成 -->
+                        </select>
+                        <span class="text-gray-600 text-lg font-bold">:</span>
+                        <select id="minute-select" class="input-field select-field">
+                            <!-- 分のオプションをJavaScriptで生成 -->
+                        </select>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 基本情報 -->
+            <div class="form-section">
+                <h2 class="form-section-header">基本情報</h2>
+                <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <div class="input-group">
+                        <label for="age" class="input-label">年齢</label>
+                        <input type="tel" id="age" class="input-field" placeholder="例: 35">
+                    </div>
+                    <div class="input-group">
+                        <label for="gender" class="input-label">性別</label>
+                        <select id="gender" class="input-field">
+                            <option value="">選択してください</option>
+                            <option value="男性">男性</option>
+                            <option value="女性">女性</option>
+                            <option value="その他">その他</option>
+                        </select>
+                    </div>
+                    <div class="input-group">
+                        <label for="location-select" class="input-label">発生場所</label>
+                        <select id="location-select" class="input-field">
+                            <option value="">選択してください</option>
+                            <option value="自宅">自宅</option>
+                            <option value="道路・公共交通機関">道路・公共交通機関</option>
+                            <option value="職場・学校">職場・学校</option>
+                            <option value="病院・診療所">病院・診療所</option>
+                            <option value="その他">その他</option>
+                        </select>
+                    </div>
+                    <!-- 「その他」が選択された時に表示される手書き用スペース -->
+                    <div id="other-location-section" class="input-group sm:col-span-2 hidden">
+                        <label class="input-label mb-2">発生場所（その他）</label>
+                        <div class="flex flex-col items-center justify-center">
+                            <canvas id="location-canvas" class="border border-gray-300 rounded-xl bg-white w-full h-24"></canvas>
+                            <button type="button" class="clear-canvas-btn mt-2 px-4 py-2 rounded-full bg-gray-200 text-gray-800 text-sm font-semibold hover:bg-gray-300 transition-colors" data-canvas-id="location-canvas">消去</button>
+                        </div>
+                    </div>
+                    <div class="input-group">
+                        <label for="team-select" class="input-label">出動隊</label>
+                        <select id="team-select" class="input-field">
+                            <option value="">選択してください</option>
+                            <option value="南救急">南救急</option>
+                            <option value="田富救急">田富救急</option>
+                            <option value="昭和救急">昭和救急</option>
+                            <option value="玉穂救急">玉穂救急</option>
+                            <option value="中道救急">中道救急</option>
+                            <option value="中央救急">中央救急</option>
+                            <option value="東部救急">東部救急</option>
+                            <option value="西救急">西救急</option>
+                            <option value="敷島救急">敷島救急</option>
+                            <option value="南アルプス救急">南アルプス救急</option>
+                            <option value="峡北救急">峡北救急</option>
+                            <option value="笛吹救急">笛吹救急</option>
+                            <option value="塩山救急">塩山救急</option>
+                            <option value="山梨救急">山梨救急</option>
+                            <option value="勝沼救急">勝沼救急</option>
+                            <option value="牧丘救急">牧丘救急</option>
+                            <option value="北部救急">北部救急</option>
+                            <option value="中部救急">中部救急</option>
+                            <option value="都留">都留</option>
+                            <option value="本部">本部</option>
+                            <option value="道志">道志</option>
+                            <option value="富士五湖救急">富士五湖救急</option>
+                            <option value="大月救急">大月救急</option>
+                            <option value="丹波山救急">丹波山救急</option>
+                            <option value="小菅救急">小菅救急</option>
+                            <option value="上野原救急">上野原救急</option>
+                            <option value="桐原">桐原</option>
+                            <option value="秋山">秋山</option>
+                            <option value="その他">その他</option>
+                        </select>
+                    </div>
+                    <!-- 出動隊の「その他」が選択された時に表示される手書き用スペース -->
+                    <div id="other-team-section" class="input-group sm:col-span-2 hidden">
+                        <label class="input-label mb-2">出動隊（その他）</label>
+                        <div class="flex flex-col items-center justify-center">
+                            <canvas id="team-canvas" class="border border-gray-300 rounded-xl bg-white w-full h-24"></canvas>
+                            <button type="button" class="clear-canvas-btn mt-2 px-4 py-2 rounded-full bg-gray-200 text-gray-800 text-sm font-semibold hover:bg-gray-300 transition-colors" data-canvas-id="team-canvas">消去</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 応需・不応需、不応需の理由・対応 -->
+            <div class="form-section">
+                <h2 class="form-section-header">応需・不応需</h2>
+                <div class="flex flex-col md:flex-row gap-4">
+                    <!-- 応需・不応需の単一プルダウン -->
+                    <div class="input-group mb-0 md:w-1/3">
+                        <label for="acceptance-refusal-select" class="input-label">応需・不応需</label>
+                        <select id="acceptance-refusal-select" class="input-field">
+                            <option value="">選択してください</option>
+                            <option value="応需">応需</option>
+                            <option value="不応需">不応需</option>
+                        </select>
+                    </div>
+
+                    <!-- 不応需の理由と不応需後の対応をまとめたコンテナ -->
+                    <div id="refusal-details-container" class="md:w-2/3 hidden">
+                        <div class="flex flex-col sm:flex-row gap-4">
+                            <!-- 不応需の理由（不応需選択時に表示） -->
+                            <div id="refusal-reason-section" class="input-group mb-0 flex-1">
+                                <label for="refusal-reason-select" class="input-label">不応需の理由</label>
+                                <select id="refusal-reason-select" class="input-field">
+                                    <option value="">選択してください</option>
+                                    <option value="初診">初診</option>
+                                    <option value="軽症">軽症</option>
+                                    <option value="カテ・手術中">カテ・手術中</option>
+                                    <option value="かかりつけ疾患との関連なし">かかりつけ疾患との関連なし</option>
+                                    <option value="管轄外">管轄外</option>
+                                    <option value="ベッド満床">ベッド満床</option>
+                                    <option value="その他">その他</option>
+                                </select>
+                            </div>
+                            
+                            <!-- 不応需後の対応 (不応需が選択された場合のみ表示) -->
+                            <div id="refusal-action-section" class="input-group mb-0 flex-1">
+                                <label for="refusal-action" class="input-label">不応需後の対応</label>
+                                <select id="refusal-action" class="input-field">
+                                    <option value="">選択してください</option>
+                                    <option value="かかりつけ医へ">かかりつけ医へ</option>
+                                    <option value="管内病院へ">管内病院へ</option>
+                                    <option value="二次救急病院へ">二次救急病院へ</option>
+                                    <option value="その他">その他</option>
+                                </select>
+                            </div>
+                        </div>
+                        
+                        <!-- 不応需の理由（その他）が選択された時に表示される手書き用スペース -->
+                        <div id="other-refusal-reason-section" class="input-group hidden">
+                            <label class="input-label mb-2">不応需の理由（その他）</label>
+                            <div class="flex flex-col items-center justify-center">
+                                <canvas id="refusal-reason-canvas" class="border border-gray-300 rounded-xl bg-white w-full h-24"></canvas>
+                                <button type="button" class="clear-canvas-btn mt-2 px-4 py-2 rounded-full bg-gray-200 text-gray-800 text-sm font-semibold hover:bg-gray-300 transition-colors" data-canvas-id="refusal-reason-canvas">消去</button>
+                            </div>
+                        </div>
+                        
+                        <!-- 不応需後の対応（その他）が選択された時に表示される手書き用スペース -->
+                        <div id="other-refusal-action-section" class="input-group hidden">
+                            <label class="input-label mb-2">不応需後の対応（その他）</label>
+                            <div class="flex flex-col items-center justify-center">
+                                <canvas id="refusal-action-canvas" class="border border-gray-300 rounded-xl bg-white w-full h-24"></canvas>
+                                <button type="button" class="clear-canvas-btn mt-2 px-4 py-2 rounded-full bg-gray-200 text-gray-800 text-sm font-semibold hover:bg-gray-300 transition-colors" data-canvas-id="refusal-action-canvas">消去</button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- バイタルサイン -->
+            <div class="form-section">
+                <h2 class="form-section-header">バイタルサイン</h2>
+                <div class="input-group">
+                    <label class="input-label">意識レベル (GCS)</label>
+                    <div class="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                        <div class="input-group mb-0">
+                            <label for="gcs-e" class="input-label text-sm">E.開眼反応 (1-4)</label>
+                            <select id="gcs-e" class="input-field">
+                                <option value="">選択</option>
+                                <option value="1">1: 開眼なし</option>
+                                <option value="2">2: 痛みで開眼</option>
+                                <option value="3">3: 呼びかけで開眼</option>
+                                <option value="4">4: 自然に開眼</option>
+                            </select>
+                        </div>
+                        <div class="input-group mb-0">
+                            <label for="gcs-v" class="input-label text-sm">V.言語反応 (1-5)</label>
+                            <select id="gcs-v" class="input-field">
+                                <option value="">選択</option>
+                                <option value="1">1: 発語なし</option>
+                                <option value="2">2: 理解不能な発語</option>
+                                <option value="3">3: 不適切な発語</option>
+                                <option value="4">4: 混乱した会話</option>
+                                <option value="5">5: 見当識あり</option>
+                            </select>
+                        </div>
+                        <div class="input-group mb-0">
+                            <label for="gcs-m" class="input-label text-sm">M.運動反応 (1-6)</label>
+                            <select id="gcs-m" class="input-field">
+                                <option value="">選択</option>
+                                <option value="1">1: 運動なし</option>
+                                <option value="2">2: 痛みで異常伸展</option>
+                                <option value="3">3: 痛みで異常屈曲</option>
+                                <option value="4">4: 痛みで逃避</option>
+                                <option value="5">5: 痛みで体動</option>
+                                <option value="6">6: 指示に従う</option>
+                            </select>
+                        </div>
+                    </div>
+                </div>
+                <!-- 意識レベルとバイタルの余白 -->
+                <div class="grid grid-cols-1 sm:grid-cols-2 gap-4 mt-6">
+                    <div class="input-group">
+                        <label for="pr" class="input-label">脈拍 (回/分)</label>
+                        <input type="tel" id="pr" class="input-field" placeholder="例: 75">
+                    </div>
+                    <div class="input-group">
+                        <label for="rr" class="input-label">呼吸数 (回/分)</label>
+                        <input type="tel" id="rr" class="input-field" placeholder="例: 18">
+                    </div>
+                    <div class="input-group">
+                        <label for="spo2" class="input-label">SpO2 (%)</label>
+                        <input type="tel" id="spo2" class="input-field" placeholder="例: 98">
+                    </div>
+                    <div class="input-group">
+                        <label for="bp" class="input-label">血圧 (mmHg)</label>
+                        <input type="text" id="bp" class="input-field" placeholder="例: 120/80">
+                    </div>
+                    <div class="input-group">
+                        <label for="bt" class="input-label">体温 (℃)</label>
+                        <input type="tel" id="bt" class="input-field" inputmode="decimal" placeholder="例: 36.5">
+                    </div>
+                    <div class="input-group">
+                        <label for="glucose" class="input-label">血糖値 (mg/dL)</label>
+                        <input type="tel" id="glucose" class="input-field" placeholder="測定した場合">
+                    </div>
+                </div>
+            </div>
+
+            <!-- 手書きによる症状メモ -->
+            <div class="form-section">
+                <h2 class="form-section-header">受傷機転・症状</h2>
+                <div class="flex flex-col items-center justify-center">
+                    <canvas id="symptoms-canvas" class="border border-gray-300 rounded-xl bg-white w-full h-72"></canvas>
+                    <button type="button" class="clear-canvas-btn mt-2 px-4 py-2 rounded-full bg-gray-200 text-gray-800 text-sm font-semibold hover:bg-gray-300 transition-colors" data-canvas-id="symptoms-canvas">消去</button>
+                </div>
+            </div>
+
+            <!-- 受け入れ要請科と要請医師を縦並びに -->
+            <div class="form-section space-y-6">
+                <!-- 受け入れ要請科 -->
+                <div>
+                    <h2 class="form-section-header">受け入れ要請科</h2>
+                    <div id="request-dept-container" class="space-y-4">
+                        <!-- Dynamic canvases will be added here -->
+                        <div class="flex items-center space-x-2">
+                            <span class="text-sm font-semibold">1.</span>
+                            <canvas id="request-dept-canvas-1" class="request-dept-canvas border border-gray-300 rounded-xl bg-white max-w-xs mx-auto" style="height: 70px;"></canvas>
+                            <button type="button" class="clear-canvas-btn px-4 py-2 rounded-full bg-gray-200 text-gray-800 text-sm font-semibold hover:bg-gray-300 transition-colors" data-canvas-id="request-dept-canvas-1">消去</button>
+                        </div>
+                    </div>
+                    <div class="mt-4 flex gap-4">
+                        <button type="button" id="add-dept-canvas" class="button secondary-button px-4 py-2 text-sm">追加</button>
+                        <button type="button" id="remove-dept-canvas" class="button secondary-button px-4 py-2 text-sm hidden">削除</button>
+                    </div>
+                </div>
+
+                <!-- 受け入れ要請医師 -->
+                <div>
+                    <h2 class="form-section-header">受け入れ要請医師</h2>
+                    <div id="request-doc-container" class="space-y-4">
+                        <!-- Dynamic canvases will be added here -->
+                        <div class="flex items-center space-x-2">
+                            <span class="text-sm font-semibold">1.</span>
+                            <canvas id="request-doc-canvas-1" class="request-doc-canvas border border-gray-300 rounded-xl bg-white max-w-xs mx-auto" style="height: 70px;"></canvas>
+                            <button type="button" class="clear-canvas-btn px-4 py-2 rounded-full bg-gray-200 text-gray-800 text-sm font-semibold hover:bg-gray-300 transition-colors" data-canvas-id="request-doc-canvas-1">消去</button>
+                        </div>
+                    </div>
+                    <div class="mt-4 flex gap-4">
+                        <button type="button" id="add-doc-canvas" class="button secondary-button px-4 py-2 text-sm">追加</button>
+                        <button type="button" id="remove-doc-canvas" class="button secondary-button px-4 py-2 text-sm hidden">削除</button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 看護師名 -->
+            <div class="form-section">
+                <h2 class="form-section-header">看護師名</h2>
+                <div class="flex flex-col items-center justify-center">
+                    <canvas id="nurse-name-canvas" class="border border-gray-300 rounded-xl bg-white max-w-xs mx-auto h-16"></canvas>
+                    <button type="button" class="clear-canvas-btn mt-2 px-4 py-2 rounded-full bg-gray-200 text-gray-800 text-sm font-semibold hover:bg-gray-300 transition-colors" data-canvas-id="nurse-name-canvas">消去</button>
+                </div>
+            </div>
+
+            <!-- 操作ボタン -->
+            <div class="flex flex-col sm:flex-row gap-4">
+                <button type="button" class="button primary-button flex-1" id="save-button" style="background-color: #3b82f6; color: white;">保存</button>
+                <button type="reset" class="button secondary-button flex-1" id="clear-button" style="background-color: #e5e7eb; color: #4b5563;">クリア</button>
+            </div>
+        </form>
+
+        <!-- メッセージ表示用のモーダル -->
+        <div id="message-modal-overlay" class="modal-overlay">
+            <div class="modal-content">
+                <h3 id="modal-title" class="text-xl font-bold mb-4">保存完了</h3>
+                <p id="modal-message" class="text-gray-700 mb-6">トリアージシートが画像としてダウンロードされました。</p>
+                <button type="button" class="button primary-button w-full" id="close-modal-button">OK</button>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Custom Numpad UI -->
+    <div id="numpad" class="hidden">
+        <div class="numpad-grid">
+            <button class="numpad-button" data-value="1">1</button>
+            <button class="numpad-button" data-value="2">2</button>
+            <button class="numpad-button" data-value="3">3</button>
+            <button class="numpad-button" data-value="4">4</button>
+            <button class="numpad-button" data-value="5">5</button>
+            <button class="numpad-button" data-value="6">6</button>
+            <button class="numpad-button" data-value="7">7</button>
+            <button class="numpad-button" data-value="8">8</button>
+            <button class="numpad-button" data-value="9">9</button>
+            <button class="numpad-button" data-value=".">.</button>
+            <button class="numpad-button" data-value="0">0</button>
+            <button class="numpad-button delete" data-value="delete">削除</button>
+        </div>
+    </div>
+
+    <script>
+        // 時と分のドロップダウンを動的に生成
+        const hourSelect = document.getElementById('hour-select');
+        const minuteSelect = document.getElementById('minute-select');
+
+        for (let i = 0; i < 24; i++) {
+            const option = document.createElement('option');
+            option.value = String(i).padStart(2, '0');
+            option.textContent = String(i).padStart(2, '0');
+            hourSelect.appendChild(option);
+        }
+
+        for (let i = 0; i < 60; i++) {
+            const option = document.createElement('option');
+            option.value = String(i).padStart(2, '0');
+            option.textContent = String(i).padStart(2, '0');
+            minuteSelect.appendChild(option);
+        }
+
+        // 現在の日時を初期値として設定
+        const now = new Date();
+        const year = now.getFullYear();
+        const month = String(now.getMonth() + 1).padStart(2, '0');
+        const day = String(now.getDate()).padStart(2, '0');
+        document.getElementById('date-input').value = `${year}-${month}-${day}`;
+        document.getElementById('hour-select').value = String(now.getHours()).padStart(2, '0');
+        document.getElementById('minute-select').value = String(now.getMinutes()).padStart(2, '0');
+
+        // バイタルサインの色分けロジック
+        document.getElementById('spo2').addEventListener('input', function(e) {
+            const spo2 = parseInt(e.target.value, 10);
+            if (spo2 < 90) {
+                e.target.style.backgroundColor = '#fca5a5'; /* 赤 */
+            } else if (spo2 >= 90 && spo2 < 95) {
+                e.target.style.backgroundColor = '#fde68a'; /* 黄 */
+            } else {
+                e.target.style.backgroundColor = '#d1fae5'; /* 緑 */
+            }
+        });
+        
+        // Canvas手書き機能の共通関数
+        function setupCanvas(canvasId, lineWidth) {
+            const canvas = document.getElementById(canvasId);
+            if (!canvas) return;
+            const ctx = canvas.getContext('2d');
+            let isDrawing = false;
+            let lastX = 0;
+            let lastY = 0;
+
+            function resizeCanvas() {
+                const parent = canvas.parentElement;
+                canvas.width = parent.clientWidth;
+                canvas.height = canvas.offsetHeight;
+            }
+
+            resizeCanvas();
+
+            window.addEventListener('resize', resizeCanvas);
+
+            ctx.lineWidth = lineWidth;
+            ctx.lineCap = 'round';
+            ctx.strokeStyle = '#000';
+            ctx.fillStyle = '#fff';
+
+            // Canvasを白で塗りつぶす
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+
+            function getEventPos(e) {
+                const rect = canvas.getBoundingClientRect();
+                const clientX = e.clientX || (e.touches ? e.touches[0].clientX : 0);
+                const clientY = e.clientY || (e.touches ? e.touches[0].clientY : 0);
+                return {
+                    x: clientX - rect.left,
+                    y: clientY - rect.top
+                };
+            }
+
+            function startDrawing(e) {
+                e.preventDefault();
+                isDrawing = true;
+                const pos = getEventPos(e);
+                [lastX, lastY] = [pos.x, pos.y];
+                ctx.beginPath();
+                ctx.moveTo(lastX, lastY);
+            }
+
+            function draw(e) {
+                if (!isDrawing) return;
+                e.preventDefault();
+                const pos = getEventPos(e);
+                ctx.lineTo(pos.x, pos.y);
+                ctx.stroke();
+                [lastX, lastY] = [pos.x, pos.y];
+            }
+
+            function stopDrawing() {
+                isDrawing = false;
+            }
+
+            canvas.addEventListener('mousedown', startDrawing);
+            canvas.addEventListener('mousemove', draw);
+            canvas.addEventListener('mouseup', stopDrawing);
+            canvas.addEventListener('mouseout', stopDrawing);
+            
+            canvas.addEventListener('touchstart', startDrawing, { passive: false });
+            canvas.addEventListener('touchmove', draw, { passive: false });
+            canvas.addEventListener('touchend', stopDrawing);
+        }
+
+        setupCanvas('location-canvas', 3);
+        setupCanvas('team-canvas', 3);
+        setupCanvas('refusal-reason-canvas', 3);
+        setupCanvas('refusal-action-canvas', 3);
+        setupCanvas('symptoms-canvas', 1);
+        setupCanvas('nurse-name-canvas', 2);
+        setupCanvas('request-dept-canvas-1', 1);
+        setupCanvas('request-doc-canvas-1', 1);
+
+        // 動的なキャンバスの追加・削除機能
+        let deptCanvasCount = 1;
+        let docCanvasCount = 1;
+
+        const addDeptButton = document.getElementById('add-dept-canvas');
+        const removeDeptButton = document.getElementById('remove-dept-canvas');
+        const deptContainer = document.getElementById('request-dept-container');
+
+        const addDocButton = document.getElementById('add-doc-canvas');
+        const removeDocButton = document.getElementById('remove-doc-canvas');
+        const docContainer = document.getElementById('request-doc-container');
+
+        function createDynamicCanvas(container, type, count) {
+            const wrapper = document.createElement('div');
+            wrapper.className = 'flex items-center space-x-2';
+            wrapper.innerHTML = `
+                <span class="text-sm font-semibold">${count}.</span>
+                <canvas id="request-${type}-canvas-${count}" class="request-${type}-canvas border border-gray-300 rounded-xl bg-white max-w-xs mx-auto" style="height: 70px;"></canvas>
+                <button type="button" class="clear-canvas-btn px-4 py-2 rounded-full bg-gray-200 text-gray-800 text-sm font-semibold hover:bg-gray-300 transition-colors" data-canvas-id="request-${type}-canvas-${count}">消去</button>
+            `;
+            container.appendChild(wrapper);
+            setupCanvas(`request-${type}-canvas-${count}`, 1);
+        }
+        
+        function updateRemoveButtonVisibility(count, removeButton) {
+            if (count > 1) {
+                removeButton.classList.remove('hidden');
+            } else {
+                removeButton.classList.add('hidden');
+            }
+        }
+        
+        addDeptButton.addEventListener('click', () => {
+            if (deptCanvasCount < 3) {
+                deptCanvasCount++;
+                createDynamicCanvas(deptContainer, 'dept', deptCanvasCount);
+                updateRemoveButtonVisibility(deptCanvasCount, removeDeptButton);
+            }
+        });
+
+        removeDeptButton.addEventListener('click', () => {
+            if (deptCanvasCount > 1) {
+                const lastItem = deptContainer.lastElementChild;
+                deptContainer.removeChild(lastItem);
+                deptCanvasCount--;
+                updateRemoveButtonVisibility(deptCanvasCount, removeDeptButton);
+            }
+        });
+
+        addDocButton.addEventListener('click', () => {
+            if (docCanvasCount < 3) {
+                docCanvasCount++;
+                createDynamicCanvas(docContainer, 'doc', docCanvasCount);
+                updateRemoveButtonVisibility(docCanvasCount, removeDocButton);
+            }
+        });
+
+        removeDocButton.addEventListener('click', () => {
+            if (docCanvasCount > 1) {
+                const lastItem = docContainer.lastElementChild;
+                docContainer.removeChild(lastItem);
+                docCanvasCount--;
+                updateRemoveButtonVisibility(docCanvasCount, removeDocButton);
+            }
+        });
+
+        // 全ての「消去」ボタンをまとめて処理するイベントリスナー
+        document.addEventListener('click', function(e) {
+            if (e.target.classList.contains('clear-canvas-btn')) {
+                const canvasId = e.target.getAttribute('data-canvas-id');
+                const canvas = document.getElementById(canvasId);
+                if (canvas) {
+                    const ctx = canvas.getContext('2d');
+                    ctx.clearRect(0, 0, canvas.width, canvas.height);
+                    ctx.fillStyle = '#fff';
+                    ctx.fillRect(0, 0, canvas.width, canvas.height);
+                }
+            }
+        });
+
+        // 発生場所の選択肢が変更されたときに手書き用スペースを表示/非表示
+        document.getElementById('location-select').addEventListener('change', function(e) {
+            const otherSection = document.getElementById('other-location-section');
+            const canvas = document.getElementById('location-canvas');
+            const ctx = canvas.getContext('2d');
+            
+            if (e.target.value === 'その他') {
+                otherSection.classList.remove('hidden');
+                const parent = canvas.parentElement;
+                canvas.width = parent.clientWidth;
+                canvas.height = canvas.offsetHeight;
+            } else {
+                otherSection.classList.add('hidden');
+                ctx.clearRect(0, 0, canvas.width, canvas.height);
+                ctx.fillStyle = '#fff';
+                ctx.fillRect(0, 0, canvas.width, canvas.height);
+            }
+        });
+
+        // 出動隊の選択肢が変更されたときに手書き用スペースを表示/非表示
+        document.getElementById('team-select').addEventListener('change', function(e) {
+            const otherSection = document.getElementById('other-team-section');
+            const canvas = document.getElementById('team-canvas');
+            const ctx = canvas.getContext('2d');
+
+            if (e.target.value === 'その他') {
+                otherSection.classList.remove('hidden');
+                const parent = canvas.parentElement;
+                canvas.width = parent.clientWidth;
+                canvas.height = canvas.offsetHeight;
+            } else {
+                otherSection.classList.add('hidden');
+                ctx.clearRect(0, 0, canvas.width, canvas.height);
+                ctx.fillStyle = '#fff';
+                ctx.fillRect(0, 0, canvas.width, canvas.height);
+            }
+        });
+        
+        // 応需・不応需の選択制御
+        document.getElementById('acceptance-refusal-select').addEventListener('change', function(e) {
+            const refusalDetailsContainer = document.getElementById('refusal-details-container');
+            const refusalReasonSelect = document.getElementById('refusal-reason-select');
+            const refusalActionSelect = document.getElementById('refusal-action');
+            const otherRefusalReasonSection = document.getElementById('other-refusal-reason-section');
+            const otherRefusalActionSection = document.getElementById('other-refusal-action-section');
+            
+            if (e.target.value === '不応需') {
+                refusalDetailsContainer.classList.remove('hidden');
+            } else {
+                refusalDetailsContainer.classList.add('hidden');
+                refusalReasonSelect.value = '';
+                refusalActionSelect.value = '';
+                otherRefusalReasonSection.classList.add('hidden');
+                otherRefusalActionSection.classList.add('hidden');
+                
+                const refusalReasonCanvas = document.getElementById('refusal-reason-canvas');
+                const refusalActionCanvas = document.getElementById('refusal-action-canvas');
+                if (refusalReasonCanvas) {
+                    const ctx = refusalReasonCanvas.getContext('2d');
+                    ctx.clearRect(0, 0, refusalReasonCanvas.width, refusalReasonCanvas.height);
+                    ctx.fillStyle = '#fff';
+                    ctx.fillRect(0, 0, refusalReasonCanvas.width, refusalReasonCanvas.height);
+                }
+                if (refusalActionCanvas) {
+                    const ctx = refusalActionCanvas.getContext('2d');
+                    ctx.clearRect(0, 0, refusalActionCanvas.width, refusalActionCanvas.height);
+                    ctx.fillStyle = '#fff';
+                    ctx.fillRect(0, 0, refusalActionCanvas.width, refusalActionCanvas.height);
+                }
+            }
+        });
+        
+        // 不応需の理由の「その他」が選択された時に手書き用スペースを表示/非表示
+        document.getElementById('refusal-reason-select').addEventListener('change', function(e) {
+            const otherRefusalReasonSection = document.getElementById('other-refusal-reason-section');
+            const canvas = document.getElementById('refusal-reason-canvas');
+            const ctx = canvas.getContext('2d');
+
+            if (e.target.value === 'その他') {
+                otherRefusalReasonSection.classList.remove('hidden');
+                const parent = canvas.parentElement;
+                canvas.width = parent.clientWidth;
+                canvas.height = canvas.offsetHeight;
+            } else {
+                otherRefusalReasonSection.classList.add('hidden');
+                ctx.clearRect(0, 0, canvas.width, canvas.height);
+                ctx.fillStyle = '#fff';
+                ctx.fillRect(0, 0, canvas.width, canvas.height);
+            }
+        });
+
+        // 不応需後の対応の「その他」が選択された時に手書き用スペースを表示/非表示
+        document.getElementById('refusal-action').addEventListener('change', function(e) {
+            const otherRefusalActionSection = document.getElementById('other-refusal-action-section');
+            const canvas = document.getElementById('refusal-action-canvas');
+            const ctx = canvas.getContext('2d');
+
+            if (e.target.value === 'その他') {
+                otherRefusalActionSection.classList.remove('hidden');
+                const parent = canvas.parentElement;
+                canvas.width = parent.clientWidth;
+                canvas.height = canvas.offsetHeight;
+            } else {
+                otherRefusalActionSection.classList.add('hidden');
+                ctx.clearRect(0, 0, canvas.width, canvas.height);
+                ctx.fillStyle = '#fff';
+                ctx.fillRect(0, 0, canvas.width, canvas.height);
+            }
+        });
+
+        // フォームを画像として保存する機能
+        document.getElementById('save-button').addEventListener('click', async function(e) {
+            e.preventDefault();
+
+            // フォームコンテナを取得
+            const formContainer = document.getElementById('triage-form-container');
+
+            // html2canvasでコンテナ全体をキャプチャ
+            html2canvas(formContainer, {
+                useCORS: true,
+                scale: 2, // 高解像度でキャプチャ
+            }).then(canvas => {
+                // ダウンロード用のリンクを作成
+                const link = document.createElement('a');
+                link.href = canvas.toDataURL('image/png');
+                link.download = `triage_sheet_${new Date().toISOString().slice(0, 10)}.png`;
+                document.body.appendChild(link);
+                link.click();
+                document.body.removeChild(link);
+
+                // モーダル表示
+                const modal = document.getElementById('message-modal-overlay');
+                modal.classList.add('visible');
+            });
+        });
+
+        // モーダルを閉じる
+        document.getElementById('close-modal-button').addEventListener('click', function() {
+            document.getElementById('message-modal-overlay').classList.remove('visible');
+        });
+
+        // クリアボタンでフォームをリセット
+        document.getElementById('clear-button').addEventListener('click', function() {
+            document.getElementById('triage-form').reset();
+
+            document.getElementById('spo2').style.backgroundColor = '';
+            document.getElementById('other-location-section').classList.add('hidden');
+            document.getElementById('other-team-section').classList.add('hidden');
+            document.getElementById('refusal-details-container').classList.add('hidden');
+            document.getElementById('other-refusal-reason-section').classList.add('hidden');
+            document.getElementById('other-refusal-action-section').classList.add('hidden');
+            
+            document.querySelectorAll('canvas').forEach(canvas => {
+                const ctx = canvas.getContext('2d');
+                ctx.clearRect(0, 0, canvas.width, canvas.height);
+                ctx.fillStyle = '#fff';
+                ctx.fillRect(0, 0, canvas.width, canvas.height);
+            });
+            
+            while (deptCanvasCount > 1) {
+                removeDeptButton.click();
+            }
+            while (docCanvasCount > 1) {
+                removeDocButton.click();
+            }
+        });
+
+        // Numpad Logic
+        const numpad = document.getElementById('numpad');
+        const numpadButtons = document.querySelectorAll('.numpad-button');
+        let activeInput = null;
+
+        // Show numpad on focus
+        document.querySelectorAll('input[type="tel"]').forEach(input => {
+            input.addEventListener('focus', (e) => {
+                activeInput = e.target;
+                numpad.classList.add('visible');
+                numpad.classList.remove('hidden');
+            });
+            input.addEventListener('blur', (e) => {
+                // Delay to allow button clicks to register
+                setTimeout(() => {
+                    if (!numpad.contains(document.activeElement)) {
+                        numpad.classList.remove('visible');
+                        numpad.classList.add('hidden');
+                        activeInput = null;
+                    }
+                }, 100);
+            });
+        });
+
+        // Handle numpad button clicks
+        numpadButtons.forEach(button => {
+            button.addEventListener('mousedown', (e) => {
+                e.preventDefault(); // Prevent input field from losing focus
+                if (!activeInput) return;
+
+                const value = button.getAttribute('data-value');
+                if (value === 'delete') {
+                    activeInput.value = activeInput.value.slice(0, -1);
+                } else {
+                    activeInput.value += value;
+                }
+                // Trigger input event for spo2 color change
+                activeInput.dispatchEvent(new Event('input'));
+            });
+        });
+    </script>
+</body>
+</html>
